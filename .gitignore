@@ -2,4 +2,5 @@
 */model
 *.ipynb_checkpoints
 *.pt
+*.pdf
 __pycache__
