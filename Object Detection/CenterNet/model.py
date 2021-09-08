@@ -134,19 +134,25 @@ class CenterNet(nn.Module):
 
         for img_index in range(batch):
             img_hm_peaks = hm_peaks_permute[img_index] # single image heatmap
-            img_sz = sz_permute[img_index] # single image size
-            img_os = os_permute[img_index] # single image offset
+            img_szs = sz_permute[img_index] # single image size
+            img_oss = os_permute[img_index] # single image offset
             values, idxs = img_hm_peaks.max(dim = 2)
             keep = values>0
 
-            img_points =torch.nonzero(values) # center point
+            img_points =torch.nonzero(values)[:,[1,0]] # center point
             img_scores = values[keep] # scores
             img_idxs = idxs[keep] # classes
-            img_sz = img_sz[keep] # size
-            img_os = img_os[keep] # offset
-
-            xymin = img_points*self.downsample + img_os - img_sz/2
-            xymax = img_points*self.downsample + img_os + img_sz/2
+            img_sz = img_szs[keep] # size
+            img_os = img_oss[keep] # offset
+            try:
+                xymin = img_points*self.downsample + img_os - img_sz/2
+                xymax = img_points*self.downsample + img_os + img_sz/2
+            except:
+                print(img_points, img_points.shape)
+                print(img_os, img_os.shape)
+                print(img_szs, img_szs.shape)
+                xymin = img_points*self.downsample + img_os - img_sz/2
+                xymax = img_points*self.downsample + img_os + img_sz/2
             img_bboxes = torch.hstack((xymin, xymax))
             img_bboxes = self._bbox_clamp(img_bboxes, (H,W))
 
@@ -170,6 +176,8 @@ class CenterNet(nn.Module):
             gt_hm = torch.zeros_like(hm, device = hm.device)
             hm_H,hm_W = hm.shape[-2:]
             hm_index = torch.stack(torch.meshgrid((torch.arange(hm_H),torch.arange(hm_W))),-1)
+            if hm.is_cuda:
+                hm_index = hm_index.cuda(hm.device)
             gt_sz = torch.zeros_like(sz_permute, device = sz_permute.device)
             gt_os = torch.zeros_like(os_permute, device = os_permute.device)
             for img_index in range(batch):
@@ -177,8 +185,8 @@ class CenterNet(nn.Module):
                 gt_hm_cpoitns, gt_sizes, gt_offsets = self.bbox2point_size_offset(img_target, self.downsample)
                 for i in range(len(img_target['classes'])):
                     img_cls = int(img_target['classes'][i])
-                    x_idx,y_idx = int(gt_hm_cpoitns[i][0]),int(gt_hm_cpoitns[i][1])
-                    
+                    x_idx,y_idx = int(gt_hm_cpoitns[i][1]),int(gt_hm_cpoitns[i][0])
+
                     gt_sz[img_index][x_idx,y_idx] = gt_sizes[i] # The ground truth of image size
                     
                     gt_os[img_index][x_idx,y_idx] = gt_offsets[i] # The ground truth of image local offset
