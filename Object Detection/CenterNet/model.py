@@ -191,7 +191,7 @@ class CenterNet(nn.Module):
             # supervision acts only at keypoints. 
             keep_train = torch.sum(gt_hm.permute(0,2,3,1) == 1,-1) > 0
             pred_sz = sz_permute[keep_train]
-            pred_os = os_permute[keep_train]
+            pred_os = os_permute[keep_train] 
             N = len(gt_sz[keep_train])
             
             size_loss = F.smooth_l1_loss(pred_sz, gt_sz[keep_train])/N
