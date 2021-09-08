@@ -124,7 +124,7 @@ class CenterNet(nn.Module):
     def forward(self, x, target = None):
         batch, C, H, W = x.shape
         # x_pre, heatmap, size, offset
-        x_pre,hm,sz,os = centerNet_Network(x)
+        x_pre,hm,sz,os = self.centerNet(x)
         hm_peaks = self._nms(hm)
         hm_peaks_permute = hm_peaks.permute(0,2,3,1)
         sz_permute = sz.permute(0,2,3,1)
@@ -154,24 +154,24 @@ class CenterNet(nn.Module):
                 dict(classes = img_idxs, 
                      scores = img_scores,
                      bboxes = img_bboxes,
-                     heatmap = hm,
-                     heatmap_peaks = hm_peaks,
-                     size = sz,
-                     offset = os,
-                     img_cpoints = img_points,
-                     img_size = img_sz,
-                     img_offset = img_os)
+                     )
+#                      heatmap_peaks = hm_peaks,
+#                      size = sz,
+#                      offset = os,
+#                      img_cpoints = img_points,
+#                      img_size = img_sz,
+#                      img_offset = img_os)
             )
             
         if self.mode == 'train':
             # training mode
             assert target is not None
             # initialize the ground truth
-            gt_hm = torch.zeros_like(hm)
+            gt_hm = torch.zeros_like(hm, device = hm.device)
             hm_H,hm_W = hm.shape[-2:]
             hm_index = torch.stack(torch.meshgrid((torch.arange(hm_H),torch.arange(hm_W))),-1)
-            gt_sz = torch.zeros_like(sz_permute)
-            gt_os = torch.zeros_like(os_permute)
+            gt_sz = torch.zeros_like(sz_permute, device = sz_permute.device)
+            gt_os = torch.zeros_like(os_permute, device = os_permute.device)
             for img_index in range(batch):
                 img_target = target[img_index]
                 gt_hm_cpoitns, gt_sizes, gt_offsets = self.bbox2point_size_offset(img_target, self.downsample)
@@ -185,6 +185,8 @@ class CenterNet(nn.Module):
                     
                     sigma = float(torch.max(gt_sizes[i]))/self.downsample
                     gauss_kernel = self.gauss2D(hm_index, gt_hm_cpoitns[i], sigma)
+                    if gt_hm.is_cuda:
+                        gauss_kernel = gauss_kernel.cuda(gt_hm.device)
                     gt_hm[img_index][img_cls] = torch.max(gt_hm[img_index][img_cls], gauss_kernel)
             # supervision acts only at keypoints. 
             keep_train = torch.sum(gt_hm.permute(0,2,3,1) == 1,-1) > 0
@@ -204,10 +206,11 @@ class CenterNet(nn.Module):
                 point_focal_loss = point_focal_loss,
                 size_loss = size_loss,
                 offset_loss = offset_loss,
-                gt_hm = gt_hm,
-                gt_sz = gt_sz,
-                gt_os = gt_os)
-            return result, losses
+                heatmap = hm,)
+#                 gt_hm = gt_hm,
+#                 gt_sz = gt_sz,
+#                 gt_os = gt_os)
+        return result, losses
             
             
     def _nms(self, hm):
