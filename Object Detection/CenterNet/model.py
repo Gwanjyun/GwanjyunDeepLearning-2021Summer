@@ -6,6 +6,8 @@ import torch.nn.functional as F
 import torchvision
 import math
 
+import numpy as np
+
 class CenterNet_ResNet_backbone(nn.Module):
     def __init__(self, downsample = 4):
         super(CenterNet_ResNet_backbone, self).__init__()
@@ -17,6 +19,7 @@ class CenterNet_ResNet_backbone(nn.Module):
         num_layer = 5 - int(math.log2(downsample))
         self.upsample = self._make_deconv_layer(num_layer)
         
+        self._normal_weight(self.upsample)
         
     def forward(self, x):
         x_pre = x
@@ -58,6 +61,13 @@ class CenterNet_ResNet_backbone(nn.Module):
                         ]
         return nn.Sequential(*backboneList)
     
+    def _normal_weight(self, layer):
+        for m in layer.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.normal_(m.weight, std = 0.001)
+            if isinstance(m, nn.ConvTranspose2d):
+                nn.init.normal_(m.weight, std = 0.001)
+    
 class CenterNet_Network(nn.Module):
     def __init__(self, num_classes = 1, downsample = 4):
         super(CenterNet_Network, self).__init__()
@@ -70,7 +80,7 @@ class CenterNet_Network(nn.Module):
             nn.ReLU(inplace=True),
             nn.Conv2d(outplanes, num_classes, 1),
             nn.BatchNorm2d(num_classes),
-            nn.Sigmoid()
+            nn.ReLU(inplace=True)
         )
         self.size_network = nn.Sequential(
             nn.Conv2d(outplanes, outplanes, 3, 1, 1),
@@ -88,6 +98,10 @@ class CenterNet_Network(nn.Module):
             nn.BatchNorm2d(2),
             nn.ReLU(inplace=True)
         )
+
+        self._normal_weight(self.heatmap_network)
+        self._normal_weight(self.size_network)
+        self._normal_weight(self.offset_network)
         
     def forward(self, x):
         feature_map, x_pre = self.centerNet_ResNet_backbone(x)
@@ -95,22 +109,30 @@ class CenterNet_Network(nn.Module):
         sz = self.size_network(feature_map)
         os = self.offset_network(feature_map)
         return x_pre, hm, sz, os
+
+    def _normal_weight(self, layer):
+        for m in layer.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.normal_(m.weight, std = 0.001)
     
 class focal_loss(nn.Module):
-    def __init__(self, alpha = 2, beta = 4, reduction = 'sum', N = 1):
+    def __init__(self, alpha = 2, beta = 4):
         super(focal_loss, self).__init__()
         self.alpha = alpha
         self.beta = beta
-        self.reduction = 'sum'
-        self.N = N
         
     def forward(self, pred_hm, gt_hm):
-        focalLoss = (1-gt_hm).pow(self.beta)*pred_hm.pow(self.alpha)*torch.log(1 - pred_hm) + \
-                    (gt_hm).pow(self.beta)*(1 - pred_hm).pow(self.alpha)*torch.log(pred_hm)
-        if self.reduction == 'sum':
-            return -torch.sum(focalLoss)
-        else:
-            return -torch.sum(focalLoss)/self.N
+        focalLoss = 0
+        pred_hm = torch.clamp(pred_hm, 1e-6, 1-1e-6)
+        pos_idx = (gt_hm == 1)
+        neg_idx = (gt_hm != 1)
+        # positive focal loss
+        focalLoss += torch.sum((1 - pred_hm[pos_idx]).pow(self.alpha)*torch.log(pred_hm[pos_idx]))
+        # negative
+        focalLoss += torch.sum((1 - gt_hm[neg_idx]).pow(self.beta)*pred_hm[neg_idx].pow(self.alpha)*torch.log(1 - pred_hm[neg_idx]))
+
+        return -focalLoss
+        
         
 class CenterNet(nn.Module):
     def __init__(self, num_classes = 1, downsample = 4, mode = 'train'):
@@ -133,9 +155,9 @@ class CenterNet(nn.Module):
         losses = []
 
         for img_index in range(batch):
-            img_hm_peaks = hm_peaks_permute[img_index] # single image heatmap
-            img_szs = sz_permute[img_index] # single image size
-            img_oss = os_permute[img_index] # single image offset
+            img_hm_peaks = hm_peaks_permute[img_index].detach() # single image heatmap
+            img_szs = sz_permute[img_index].detach() # single image size
+            img_oss = os_permute[img_index].detach() # single image offset
             values, idxs = img_hm_peaks.max(dim = 2)
             keep = values>0
 
@@ -144,15 +166,8 @@ class CenterNet(nn.Module):
             img_idxs = idxs[keep] # classes
             img_sz = img_szs[keep] # size
             img_os = img_oss[keep] # offset
-            try:
-                xymin = img_points*self.downsample + img_os - img_sz/2
-                xymax = img_points*self.downsample + img_os + img_sz/2
-            except:
-                print(img_points, img_points.shape)
-                print(img_os, img_os.shape)
-                print(img_szs, img_szs.shape)
-                xymin = img_points*self.downsample + img_os - img_sz/2
-                xymax = img_points*self.downsample + img_os + img_sz/2
+            xymin = img_points*self.downsample + img_os - img_sz/2
+            xymax = img_points*self.downsample + img_os + img_sz/2
             img_bboxes = torch.hstack((xymin, xymax))
             img_bboxes = self._bbox_clamp(img_bboxes, (H,W))
 
@@ -180,34 +195,51 @@ class CenterNet(nn.Module):
                 hm_index = hm_index.cuda(hm.device)
             gt_sz = torch.zeros_like(sz_permute, device = sz_permute.device)
             gt_os = torch.zeros_like(os_permute, device = os_permute.device)
+
+            size_loss = 0
+            offset_loss = 0
+
+
+            N = 0
             for img_index in range(batch):
                 img_target = target[img_index]
                 gt_hm_cpoitns, gt_sizes, gt_offsets = self.bbox2point_size_offset(img_target, self.downsample)
                 for i in range(len(img_target['classes'])):
+                    N += 1
                     img_cls = int(img_target['classes'][i])
-                    x_idx,y_idx = int(gt_hm_cpoitns[i][1]),int(gt_hm_cpoitns[i][0])
+                    x_idx,y_idx = int(gt_hm_cpoitns[i][0]),int(gt_hm_cpoitns[i][1])
 
-                    gt_sz[img_index][x_idx,y_idx] = gt_sizes[i] # The ground truth of image size
+                    # gt_sz[img_index][x_idx,y_idx] = gt_sizes[i] # The ground truth of image size
                     
-                    gt_os[img_index][x_idx,y_idx] = gt_offsets[i] # The ground truth of image local offset
+                    # gt_os[img_index][x_idx,y_idx] = gt_offsets[i] # The ground truth of image local offset
                     
-                    sigma = float(torch.max(gt_sizes[i]))/self.downsample
-                    gauss_kernel = self.gauss2D(hm_index, gt_hm_cpoitns[i], sigma)
+                    size_loss += F.smooth_l1_loss(sz_permute[img_index][x_idx, y_idx], gt_sizes[i])
+                    offset_loss += F.smooth_l1_loss(os_permute[img_index][x_idx, y_idx], gt_offsets[i])
+
+
+                    sigma = float(torch.max(gt_sizes[i]))/self.downsample/3
+                    gauss_kernel = self.gauss2D(hm_index, gt_hm_cpoitns[i], sigma).detach()
                     if gt_hm.is_cuda:
                         gauss_kernel = gauss_kernel.cuda(gt_hm.device)
                     gt_hm[img_index][img_cls] = torch.max(gt_hm[img_index][img_cls], gauss_kernel)
             # supervision acts only at keypoints. 
-            keep_train = torch.sum(gt_hm.permute(0,2,3,1) == 1,-1) > 0
-            pred_sz = sz_permute[keep_train]
-            pred_os = os_permute[keep_train] 
-            N = len(gt_sz[keep_train])
+            # keep_train = torch.sum(gt_hm.permute(0,2,3,1) == 1,-1) > 0
+            # pred_sz = sz_permute[keep_train]
+            # pred_os = os_permute[keep_train] 
+            # N = len(gt_sz[keep_train])
+
+            # N = 
             
-            size_loss = F.smooth_l1_loss(pred_sz, gt_sz[keep_train])/N
-            offset_loss = F.smooth_l1_loss(pred_os, gt_os[keep_train])/N
+            # size_loss = F.smooth_l1_loss(pred_sz, gt_sz[keep_train])
+            # offset_loss = F.smooth_l1_loss(pred_os, gt_os[keep_train])
             
-            focalLoss = focal_loss(2,4,'mean',N)
-            point_focal_loss = focalLoss(hm, gt_hm)
+            size_loss = size_loss/N
             
+            offset_loss = offset_loss/N
+
+            focalLoss = focal_loss(2,4)
+            point_focal_loss = focalLoss(hm, gt_hm)/N
+
             
             
             losses = dict(
@@ -215,7 +247,12 @@ class CenterNet(nn.Module):
                 size_loss = size_loss,
                 offset_loss = offset_loss,
                 heatmap = hm,)
-#                 gt_hm = gt_hm,
+                # pred_sz = pred_sz,
+                # pred_os = pred_os,
+                # gt_sz = gt_sz[keep_train],
+                # gt_os = gt_os[keep_train],
+                # gt_sizes = gt_sizes,
+                # gt_hm = gt_hm,
 #                 gt_sz = gt_sz,
 #                 gt_os = gt_os)
         return result, losses
@@ -241,7 +278,7 @@ class CenterNet(nn.Module):
         img_bboxes = img_target['bboxes']
         xmin, ymin = img_bboxes[:, 0], img_bboxes[:, 1]
         xmax, ymax = img_bboxes[:, 2], img_bboxes[:, 3]
-        gt_img_cpoints = torch.stack([(xmin+xmax)/2, (ymin+ymax)/2],-1)
+        gt_img_cpoints = torch.stack([(ymin+ymax)/2, (xmin+xmax)/2],-1)
         gt_hm_cpoitns = torch.floor(gt_img_cpoints/downsample)
         gt_sizes = torch.stack([xmax-xmin, ymax-ymin],-1)
         gt_offsets =  gt_img_cpoints/downsample - gt_hm_cpoitns
