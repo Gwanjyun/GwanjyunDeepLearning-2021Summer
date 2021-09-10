@@ -125,7 +125,7 @@ optimizer = optim.Adam(centerNet.parameters(),5e-4)
 centerNet.train()
 centerNet.mode = 'train'
 min_loss = 1e9
-epoch_range = trange(70)
+epoch_range = trange(350)
 
 for epoch in epoch_range:
     myiter = tqdm(car_dataloader,colour = '#0066FF')
@@ -137,15 +137,16 @@ for epoch in epoch_range:
         result, losses = centerNet(x,target)
 
         optimizer.zero_grad()
-        loss = losses['point_focal_loss'] + 0.1*losses['size_loss'] + losses['offset_loss']
+        loss = losses['point_focal_loss'] + losses['size_loss'] + losses['offset_loss']
         loss.backward()
         optimizer.step()
         all_loss += float(loss)
-        epoch_range.set_postfix(allLoss = float(all_loss),minLoss = float(min_loss))
+        
         myiter.set_postfix(l = float(loss),fl = float(losses['point_focal_loss']),
                            szl = float(losses['size_loss']),
                            osl = float(losses['offset_loss']),
                            )
+    epoch_range.set_postfix(allLoss = float(all_loss),minLoss = float(min_loss))
     
     
         

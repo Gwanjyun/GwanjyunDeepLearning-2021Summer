@@ -166,6 +166,10 @@ class CenterNet(nn.Module):
             img_idxs = idxs[keep] # classes
             img_sz = img_szs[keep] # size
             img_os = img_oss[keep] # offset
+
+            img_sz[:,0] = img_sz[:,0]*W
+            img_sz[:,1] = img_sz[:,1]*H
+
             xymin = img_points*self.downsample + img_os - img_sz/2
             xymax = img_points*self.downsample + img_os + img_sz/2
             img_bboxes = torch.hstack((xymin, xymax))
@@ -193,8 +197,8 @@ class CenterNet(nn.Module):
             hm_index = torch.stack(torch.meshgrid((torch.arange(hm_H),torch.arange(hm_W))),-1)
             if hm.is_cuda:
                 hm_index = hm_index.cuda(hm.device)
-            gt_sz = torch.zeros_like(sz_permute, device = sz_permute.device)
-            gt_os = torch.zeros_like(os_permute, device = os_permute.device)
+            # gt_sz = torch.zeros_like(sz_permute, device = sz_permute.device)
+            # gt_os = torch.zeros_like(os_permute, device = os_permute.device)
 
             size_loss = 0
             offset_loss = 0
@@ -204,6 +208,9 @@ class CenterNet(nn.Module):
             for img_index in range(batch):
                 img_target = target[img_index]
                 gt_hm_cpoitns, gt_sizes, gt_offsets = self.bbox2point_size_offset(img_target, self.downsample)
+                gt_sizes[:,0] = gt_sizes[:,0]/W
+                gt_sizes[:,1] = gt_sizes[:,1]/H
+                
                 for i in range(len(img_target['classes'])):
                     N += 1
                     img_cls = int(img_target['classes'][i])
@@ -234,7 +241,7 @@ class CenterNet(nn.Module):
             # offset_loss = F.smooth_l1_loss(pred_os, gt_os[keep_train])
             
             size_loss = size_loss/N
-            
+
             offset_loss = offset_loss/N
 
             focalLoss = focal_loss(2,4)
