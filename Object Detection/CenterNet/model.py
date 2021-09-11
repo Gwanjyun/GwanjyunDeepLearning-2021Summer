@@ -208,6 +208,10 @@ class CenterNet(nn.Module):
             for img_index in range(batch):
                 img_target = target[img_index]
                 gt_hm_cpoitns, gt_sizes, gt_offsets = self.bbox2point_size_offset(img_target, self.downsample)
+                
+                gt_sizes = gt_sizes.detach()
+                gt_offsets = gt_offsets.detach()
+                
                 gt_sizes[:,0] = gt_sizes[:,0]/W
                 gt_sizes[:,1] = gt_sizes[:,1]/H
                 

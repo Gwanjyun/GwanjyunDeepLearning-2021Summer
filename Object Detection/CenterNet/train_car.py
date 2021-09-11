@@ -72,7 +72,10 @@ class cardset(torch.utils.data.Dataset):
         self.train_bbox = {d:np.array(self.train_bbox[d],dtype = np.float32) for d in self.train_bbox}
         # 读取数据到内存
         for filename in tqdm(self.train_imagefile,desc = 'Reading train data'):
-            img = Image.open(path + 'training_images/' + filename)
+            try:
+                img = Image.open(path + 'training_images/' + filename)
+            except:
+                continue
             self.train_img.append([filename,img])
             if filename not in self.train_bbox:
                 self.train_bbox.update({filename:[]})
@@ -81,7 +84,10 @@ class cardset(torch.utils.data.Dataset):
                 i += 1
                 
         for filename in tqdm(self.test_imagefile,desc = 'Reading test data'):
-            img = Image.open(path + 'testing_images/' + filename)
+            try:
+                img = Image.open(path + 'testing_images/' + filename)
+            except:
+                continue
             self.test_img.append([filename,img])
             
     def __getitem__(self, index):
@@ -125,7 +131,7 @@ optimizer = optim.Adam(centerNet.parameters(),5e-4)
 centerNet.train()
 centerNet.mode = 'train'
 min_loss = 1e9
-epoch_range = trange(350)
+epoch_range = trange(100)
 
 for epoch in epoch_range:
     myiter = tqdm(car_dataloader,colour = '#0066FF')
@@ -146,13 +152,16 @@ for epoch in epoch_range:
                            szl = float(losses['size_loss']),
                            osl = float(losses['offset_loss']),
                            )
-    epoch_range.set_postfix(allLoss = float(all_loss),minLoss = float(min_loss))
+        epoch_range.set_postfix(allLoss = float(all_loss),minLoss = float(min_loss))
+    
     
     
         
     if all_loss < min_loss:
         min_loss = all_loss
         torch.save(centerNet, 'CenterNet/model/centerNet3.pt')
+torch.save(centerNet, 'CenterNet/model/centerNet3.pt')
+    
 
 
 
