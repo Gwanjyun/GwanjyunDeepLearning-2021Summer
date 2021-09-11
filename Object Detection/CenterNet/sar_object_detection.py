@@ -153,7 +153,7 @@ def getTarget(y, device):
     return y
 
 try:
-    centerNet = torch.load('CenterNet/model/centerNet_sar.pt')
+    centerNet = torch.load('CenterNet/model/centerNet_sar_final.pt')
     print('!!!!load model success!!!!6')
 except:
     centerNet = CenterNet(7)
@@ -165,7 +165,7 @@ optimizer = optim.AdamW(centerNet.parameters(), 5e-4)
 centerNet.train()
 centerNet.mode = 'train'
 min_loss = 1e9
-epoch_range = trange(80)
+epoch_range = trange(25)
 for epoch in epoch_range:
     myiter = tqdm(sar_dataloader,colour = '#0066FF')
     myiter.set_description_str('car dataloader')
