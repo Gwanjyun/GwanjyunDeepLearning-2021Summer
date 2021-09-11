@@ -283,10 +283,10 @@ class CenterNet(nn.Module):
     
     def bbox2point_size_offset(self, img_target, downsample = 4):
         img_bboxes = img_target['bboxes']
-        xmin, ymin = img_bboxes[:, 0], img_bboxes[:, 1]
-        xmax, ymax = img_bboxes[:, 2], img_bboxes[:, 3]
-        gt_img_cpoints = torch.stack([(ymin+ymax)/2, (xmin+xmax)/2],-1)
+        xmin, ymin = img_bboxes[:, 0:1], img_bboxes[:, 1:2]
+        xmax, ymax = img_bboxes[:, 2:3], img_bboxes[:, 3:4]
+        gt_img_cpoints = torch.hstack([(ymin+ymax)/2, (xmin+xmax)/2])
         gt_hm_cpoitns = torch.floor(gt_img_cpoints/downsample)
-        gt_sizes = torch.stack([xmax-xmin, ymax-ymin],-1)
+        gt_sizes = torch.hstack([xmax-xmin, ymax-ymin])
         gt_offsets =  gt_img_cpoints/downsample - gt_hm_cpoitns
         return gt_hm_cpoitns, gt_sizes, gt_offsets
