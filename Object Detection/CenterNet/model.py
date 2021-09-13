@@ -291,6 +291,6 @@ class CenterNet(nn.Module):
         xmax, ymax = img_bboxes[:, 2:3], img_bboxes[:, 3:4]
         gt_img_cpoints = torch.hstack([(ymin+ymax)/2, (xmin+xmax)/2])
         gt_hm_cpoitns = torch.floor(gt_img_cpoints/downsample)
-        gt_sizes = torch.hstack([xmax-xmin, ymax-ymin])
+        gt_sizes = torch.hstack([ymax-ymin, xmax-xmin])
         gt_offsets =  gt_img_cpoints/downsample - gt_hm_cpoitns
         return gt_hm_cpoitns, gt_sizes, gt_offsets

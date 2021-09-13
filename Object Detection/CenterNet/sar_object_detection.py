@@ -160,12 +160,12 @@ except:
 centerNet.to(device)
 centerNet.mode = 'train'
 
-optimizer = optim.AdamW(centerNet.parameters(), 5e-4)
+optimizer = optim.Adam(centerNet.parameters(), 5e-4)
 
 centerNet.train()
 centerNet.mode = 'train'
 min_loss = 1e9
-epoch_range = trange(25)
+epoch_range = trange(150)
 for epoch in epoch_range:
     myiter = tqdm(sar_dataloader,colour = '#0066FF')
     myiter.set_description_str('car dataloader')
@@ -183,7 +183,7 @@ for epoch in epoch_range:
                            szl = float(losses['size_loss']),
                            osl = float(losses['offset_loss']),
                            )
-    epoch_range.set_postfix(allLoss = float(all_loss),minLoss = float(min_loss))
+        epoch_range.set_postfix(allLoss = float(all_loss),minLoss = float(min_loss))
     
     if all_loss < min_loss:
         min_loss = all_loss
